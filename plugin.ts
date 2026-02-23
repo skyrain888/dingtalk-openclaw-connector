@@ -113,13 +113,14 @@ function getSessionKey(
 
 // ============ Access Token 缓存 ============
 
-let accessToken: string | null = null;
-let accessTokenExpiry = 0;
+/** 按 clientId 分别缓存 Access Token，避免多 bot 场景下 token 互相污染 */
+const accessTokenCache = new Map<string, { token: string; expiry: number }>();
 
 async function getAccessToken(config: any): Promise<string> {
   const now = Date.now();
-  if (accessToken && accessTokenExpiry > now + 60_000) {
-    return accessToken;
+  const cached = accessTokenCache.get(config.clientId);
+  if (cached && cached.expiry > now + 60_000) {
+    return cached.token;
   }
 
   const response = await axios.post('https://api.dingtalk.com/v1.0/oauth2/accessToken', {
@@ -127,9 +128,10 @@ async function getAccessToken(config: any): Promise<string> {
     appSecret: config.clientSecret,
   });
 
-  accessToken = response.data.accessToken;
-  accessTokenExpiry = now + (response.data.expireIn * 1000);
-  return accessToken!;
+  const token = response.data.accessToken;
+  const expiry = now + (response.data.expireIn * 1000);
+  accessTokenCache.set(config.clientId, { token, expiry });
+  return token;
 }
 
 // ============ 配置工具 ============
