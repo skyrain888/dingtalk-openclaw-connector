@@ -1,0 +1,23 @@
+plugin.ts
+  713aa7881289ca92 116-117,121-123,131-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.37",
+  "base_commit_sha": "66d8c8fa534c3b97b67a44c740ce4b0ab66f92c8",
+  "prompts": {
+    "713aa7881289ca92": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "97ab686c-67f6-4b16-8623-b530255750d8",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sky <53413907>",
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 7,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
