@@ -73,20 +73,26 @@ function isNewSessionCommand(text: string): boolean {
 }
 
 /** 获取或创建用户 session key */
+/**
+ * 管理用户会话的生命周期（超时、强制新建）。
+ * @param cacheKey    唯一缓存 key，格式 `${accountId}:${senderId}`，区分不同 bot 的同一用户
+ * @param baseKey     由 resolveAgentRoute 返回的规范 session key（含 agent: 前缀），用作会话基础
+ */
 function getSessionKey(
-  senderId: string,
+  cacheKey: string,
+  baseKey: string,
   forceNew: boolean,
   sessionTimeout: number,
   log?: any,
 ): { sessionKey: string; isNew: boolean } {
   const now = Date.now();
-  const existing = userSessions.get(senderId);
+  const existing = userSessions.get(cacheKey);
 
-  // 强制新会话
+  // 强制新会话：在 baseKey 后追加时间戳，开启全新对话
   if (forceNew) {
-    const sessionId = `dingtalk-connector:${senderId}:${now}`;
-    userSessions.set(senderId, { lastActivity: now, sessionId });
-    log?.info?.(`[DingTalk][Session] 用户主动开启新会话: ${senderId}`);
+    const sessionId = `${baseKey}:${now}`;
+    userSessions.set(cacheKey, { lastActivity: now, sessionId });
+    log?.info?.(`[DingTalk][Session] 用户主动开启新会话: ${cacheKey}`);
     return { sessionKey: sessionId, isNew: true };
   }
 
@@ -94,9 +100,9 @@ function getSessionKey(
   if (existing) {
     const elapsed = now - existing.lastActivity;
     if (elapsed > sessionTimeout) {
-      const sessionId = `dingtalk-connector:${senderId}:${now}`;
-      userSessions.set(senderId, { lastActivity: now, sessionId });
-      log?.info?.(`[DingTalk][Session] 会话超时(${Math.round(elapsed / 60000)}分钟)，自动开启新会话: ${senderId}`);
+      const sessionId = `${baseKey}:${now}`;
+      userSessions.set(cacheKey, { lastActivity: now, sessionId });
+      log?.info?.(`[DingTalk][Session] 会话超时(${Math.round(elapsed / 60000)}分钟)，自动开启新会话: ${cacheKey}`);
       return { sessionKey: sessionId, isNew: true };
     }
     // 更新活跃时间
@@ -104,11 +110,10 @@ function getSessionKey(
     return { sessionKey: existing.sessionId, isNew: false };
   }
 
-  // 首次会话
-  const sessionId = `dingtalk-connector:${senderId}`;
-  userSessions.set(senderId, { lastActivity: now, sessionId });
-  log?.info?.(`[DingTalk][Session] 新用户首次会话: ${senderId}`);
-  return { sessionKey: sessionId, isNew: false };
+  // 首次会话：直接使用 baseKey
+  userSessions.set(cacheKey, { lastActivity: now, sessionId: baseKey });
+  log?.info?.(`[DingTalk][Session] 新用户首次会话: ${cacheKey}`);
+  return { sessionKey: baseKey, isNew: false };
 }
 
 // ============ Access Token 缓存 ============
@@ -2001,22 +2006,38 @@ async function handleDingTalkMessage(params: {
 
   log?.info?.(`[DingTalk] 收到消息: from=${senderName} text="${content.text.slice(0, 50)}..."`);
 
+  // ===== Agent 路由 =====
+  // 通过 resolveAgentRoute 获取正确的 agentId 和规范 session key
+  // 这是 openclaw 路由规则（accountId=bot-xxx → agent）的唯一正确入口
+  const rt = getRuntime();
+  const route = rt.channel.routing.resolveAgentRoute({
+    cfg,
+    channel: 'dingtalk-connector',
+    accountId,
+    peer: isDirect
+      ? { kind: 'direct' as const, id: senderId }
+      : { kind: 'group' as const, id: data.conversationId || senderId },
+  });
+  log?.info?.(`[DingTalk][Route] agentId=${route.agentId}, matchedBy=${route.matchedBy}, baseKey=${route.sessionKey}`);
+
   // ===== Session 管理 =====
   const sessionTimeout = dingtalkConfig.sessionTimeout ?? 1800000; // 默认 30 分钟
   const forceNewSession = isNewSessionCommand(content.text);
+  // cacheKey 区分不同 bot 的同一用户，避免跨 bot 共享 session 状态
+  const cacheKey = `${accountId}:${senderId}`;
 
   // 如果是新会话命令，直接回复确认消息
   if (forceNewSession) {
-    const { sessionKey } = getSessionKey(senderId, true, sessionTimeout, log);
+    const { sessionKey } = getSessionKey(cacheKey, route.sessionKey, true, sessionTimeout, log);
     await sendMessage(dingtalkConfig, sessionWebhook, '✨ 已开启新会话，之前的对话已清空。', {
       atUserId: !isDirect ? senderId : null,
     });
-    log?.info?.(`[DingTalk] 用户请求新会话: ${senderId}, newKey=${sessionKey}`);
+    log?.info?.(`[DingTalk] 用户请求新会话: ${cacheKey}, newKey=${sessionKey}`);
     return;
   }
 
   // 获取或创建 session
-  const { sessionKey, isNew } = getSessionKey(senderId, false, sessionTimeout, log);
+  const { sessionKey, isNew } = getSessionKey(cacheKey, route.sessionKey, false, sessionTimeout, log);
   log?.info?.(`[DingTalk][Session] key=${sessionKey}, isNew=${isNew}`);
 
   // Gateway 认证：优先使用 token，其次 password
