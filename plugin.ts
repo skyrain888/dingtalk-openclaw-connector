@@ -1107,7 +1107,9 @@ async function* streamFromGateway(options: GatewayOptions): AsyncGenerator<strin
     headers['Authorization'] = `Bearer ${gatewayAuth}`;
   }
 
-  log?.info?.(`[DingTalk][Gateway] POST ${gatewayUrl}, session=${sessionKey}, messages=${messages.length}`);
+  log?.info?.(`[DingTalk][Gateway] POST ${gatewayUrl}, messages=${messages.length}`);
+  // ★ 诊断日志：实际发送给 gateway 的 user（session key），决定路由到哪个 agent
+  log?.info?.(`[DingTalk][DIAG] gateway user（session key）= ${sessionKey}`);
 
   const response = await fetch(gatewayUrl, {
     method: 'POST',
@@ -2010,6 +2012,9 @@ async function handleDingTalkMessage(params: {
   // 通过 resolveAgentRoute 获取正确的 agentId 和规范 session key
   // 这是 openclaw 路由规则（accountId=bot-xxx → agent）的唯一正确入口
   const rt = getRuntime();
+  // ★ 诊断日志：确认 accountId 和 API 可用性
+  log?.info?.(`[DingTalk][DIAG] accountId=${accountId}, isDirect=${isDirect}, senderId=${senderId}`);
+  log?.info?.(`[DingTalk][DIAG] resolveAgentRoute 可用：${typeof rt.channel?.routing?.resolveAgentRoute}`);
   const route = rt.channel.routing.resolveAgentRoute({
     cfg,
     channel: 'dingtalk-connector',
@@ -2018,7 +2023,9 @@ async function handleDingTalkMessage(params: {
       ? { kind: 'direct' as const, id: senderId }
       : { kind: 'group' as const, id: data.conversationId || senderId },
   });
-  log?.info?.(`[DingTalk][Route] agentId=${route.agentId}, matchedBy=${route.matchedBy}, baseKey=${route.sessionKey}`);
+  // ★ 诊断日志：路由结果
+  log?.info?.(`[DingTalk][DIAG] route → agentId=${route.agentId}, matchedBy=${route.matchedBy}`);
+  log?.info?.(`[DingTalk][DIAG] route → sessionKey=${route.sessionKey}`);
 
   // ===== Session 管理 =====
   const sessionTimeout = dingtalkConfig.sessionTimeout ?? 1800000; // 默认 30 分钟
@@ -2519,6 +2526,8 @@ const plugin = {
   },
   register(api: ClawdbotPluginApi) {
     runtime = api.runtime;
+    // ★ 诊断日志：确认加载的是哪个版本的代码
+    console.log('[DingTalk][DIAG] 插件已加载 version=0.6.1-fix-routing，resolveAgentRoute 支持：', typeof api.runtime?.channel?.routing?.resolveAgentRoute);
     api.registerChannel({ plugin: dingtalkPlugin });
 
     // ===== Gateway Methods =====
