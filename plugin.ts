@@ -1087,12 +1087,13 @@ interface GatewayOptions {
   userContent: string;
   systemPrompts: string[];
   sessionKey: string;
+  agentId: string;       // 目标 agent，例如 "coding" 或 "main"
   gatewayAuth?: string;  // token 或 password，都用 Bearer 格式
   log?: any;
 }
 
 async function* streamFromGateway(options: GatewayOptions): AsyncGenerator<string, void, unknown> {
-  const { userContent, systemPrompts, sessionKey, gatewayAuth, log } = options;
+  const { userContent, systemPrompts, sessionKey, agentId, gatewayAuth, log } = options;
   const rt = getRuntime();
   const gatewayUrl = `http://127.0.0.1:${rt.gateway?.port || 18789}/v1/chat/completions`;
 
@@ -1106,19 +1107,20 @@ async function* streamFromGateway(options: GatewayOptions): AsyncGenerator<strin
   if (gatewayAuth) {
     headers['Authorization'] = `Bearer ${gatewayAuth}`;
   }
+  // 通过 x-openclaw-agent-id 头指定目标 agent（优先级最高）
+  headers['x-openclaw-agent-id'] = agentId;
+  // 通过 x-openclaw-session-key 头直接指定 session key，绕过 gateway 内部 user 字段的二次包装
+  headers['x-openclaw-session-key'] = sessionKey;
 
-  log?.info?.(`[DingTalk][Gateway] POST ${gatewayUrl}, messages=${messages.length}`);
-  // ★ 诊断日志：实际发送给 gateway 的 user（session key），决定路由到哪个 agent
-  log?.info?.(`[DingTalk][DIAG] gateway user（session key）= ${sessionKey}`);
+  log?.info?.(`[DingTalk][Gateway] POST ${gatewayUrl}, agentId=${agentId}, sessionKey=${sessionKey}, messages=${messages.length}`);
 
   const response = await fetch(gatewayUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      model: 'default',
+      model: `openclaw:${agentId}`,  // 双重保险：通过 model 字段也指定 agent
       messages,
       stream: true,
-      user: sessionKey,  // 用于 session 持久化
     }),
   });
 
@@ -2087,6 +2089,7 @@ async function handleDingTalkMessage(params: {
         userContent: content.text,
         systemPrompts,
         sessionKey,
+        agentId: route.agentId,
         gatewayAuth,
         log,
       })) {
@@ -2166,6 +2169,7 @@ async function handleDingTalkMessage(params: {
         userContent: content.text,
         systemPrompts,
         sessionKey,
+        agentId: route.agentId,
         gatewayAuth,
         log,
       })) {
